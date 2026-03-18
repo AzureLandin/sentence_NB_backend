@@ -46,15 +46,22 @@ def resolve_api_config(user_id, config_type: str) -> dict:
             user_key = None
 
     if user_key:
-        # endpoint / model 未填则 fallback 到平台默认值
         user_endpoint = getattr(user_cfg, f'{config_type}_endpoint', None)
         user_model = getattr(user_cfg, f'{config_type}_model', None)
-        default_endpoint = current_app.config.get(f'DEFAULT_{config_type.upper()}_ENDPOINT')
-        default_model = current_app.config.get(f'DEFAULT_{config_type.upper()}_MODEL')
+        # endpoint 和 model 必须与用户自有 Key 一起填写，不得 fallback 到平台默认值
+        # （平台默认 endpoint 只能配合平台默认 Key 使用，二者来自同一个服务商）
+        if not user_endpoint:
+            raise AiConfigMissingError(
+                f'{config_type}_endpoint（已填写 API Key，请一并填写对应的 API 端点）'
+            )
+        if not user_model:
+            raise AiConfigMissingError(
+                f'{config_type}_model（已填写 API Key，请一并填写对应的模型 ID）'
+            )
         return {
             'api_key':  user_key,
-            'endpoint': user_endpoint or default_endpoint,
-            'model':    user_model or default_model,
+            'endpoint': user_endpoint,
+            'model':    user_model,
         }
 
     default_key = current_app.config.get(f'DEFAULT_{config_type.upper()}_API_KEY', '')
