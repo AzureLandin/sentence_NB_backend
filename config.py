@@ -1,11 +1,29 @@
 import os
+from urllib.parse import quote_plus
 from dotenv import load_dotenv
 
 load_dotenv()
 
 
+def _build_database_url():
+    # 微信云托管自动注入的 MySQL 环境变量（优先使用）
+    mysql_address = os.getenv('MYSQL_ADDRESS')       # 格式: host:port
+    mysql_username = os.getenv('MYSQL_USERNAME')
+    mysql_password = os.getenv('MYSQL_PASSWORD')
+    mysql_database = os.getenv('MYSQL_DATABASE', 'englishnotebook')
+
+    if mysql_address and mysql_username and mysql_password:
+        return (
+            f"mysql+pymysql://{quote_plus(mysql_username)}:{quote_plus(mysql_password)}"
+            f"@{mysql_address}/{mysql_database}?charset=utf8mb4"
+        )
+
+    # 本地开发：通过 DATABASE_URL 手动指定
+    return os.getenv('DATABASE_URL', 'sqlite:///app.db')
+
+
 class Config:
-    SQLALCHEMY_DATABASE_URI = os.getenv('DATABASE_URL', 'sqlite:///app.db')
+    SQLALCHEMY_DATABASE_URI = _build_database_url()
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     JWT_SECRET_KEY = os.getenv('JWT_SECRET_KEY', 'dev-secret-key')
     JWT_ALGORITHM = os.getenv('JWT_ALGORITHM', 'HS256')
