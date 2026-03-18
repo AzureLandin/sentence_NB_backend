@@ -1,9 +1,12 @@
 import uuid
+import os
+import requests as http_requests
 from datetime import datetime
 from flask import Blueprint, request, jsonify, g
 from app import db
 from app.models import User
 from app.services.auth_service import AuthService
+from app.blueprints.user import auth_required
 
 auth_bp = Blueprint('auth', __name__, url_prefix='/auth')
 
@@ -152,3 +155,122 @@ def logout():
         db.session.commit()
     
     return success_response({}, '已登出')
+
+
+def _call_wechat_code2session(code):
+    """调用微信 code2session 接口，返回 (openid, error_code)"""
+    appid = os.environ.get('WECHAT_APPID', '')
+    secret = os.environ.get('WECHAT_SECRET', '')
+
+    if not appid or not secret:
+        return None, 'WECHAT_CONFIG_MISSING'
+
+    url = (
+        f'https://api.weixin.qq.com/sns/jscode2session'
+        f'?appid={appid}&secret={secret}&js_code={code}&grant_type=authorization_code'
+    )
+    try:
+        resp = http_requests.get(url, timeout=5)
+        wx_data = resp.json()
+    except Exception:
+        return None, 'WECHAT_API_UNAVAILABLE'
+
+    if wx_data.get('errcode') and wx_data['errcode'] != 0:
+        return None, 'WECHAT_CODE_INVALID'
+
+    openid = wx_data.get('openid')
+    if not openid:
+        return None, 'WECHAT_CODE_INVALID'
+
+    return openid, None
+
+
+@auth_bp.route('/wechat', methods=['POST'])
+def wechat_login():
+    """微信一键登录：code 换 JWT"""
+    data = request.get_json()
+    if not data:
+        return error_response('请求体无效', 'VALIDATION_FAILED', 422)
+
+    code = data.get('code', '').strip()
+    if not code:
+        return error_response('code 必填', 'VALIDATION_FAILED', 422)
+
+    openid, err = _call_wechat_code2session(code)
+
+    if err == 'WECHAT_CONFIG_MISSING':
+        return error_response('微信登录暂不可用', 'WECHAT_CONFIG_MISSING', 500)
+    if err == 'WECHAT_API_UNAVAILABLE':
+        return error_response('微信服务暂时不可用，请稍后重试', 'WECHAT_API_UNAVAILABLE', 503)
+    if err == 'WECHAT_CODE_INVALID':
+        return error_response('微信授权已过期，请重试', 'WECHAT_CODE_INVALID', 400)
+
+    # 查找或创建用户
+    user = User.query.filter_by(wechat_openid=openid).first()
+    if not user:
+        user = User(
+            id=str(uuid.uuid4()),
+            wechat_openid=openid,
+            display_name='微信用户',
+            status='active',
+        )
+        db.session.add(user)
+
+    if user.status != 'active':
+        return error_response('账号已禁用', 'ACCOUNT_DISABLED', 403)
+
+    refresh_token_obj, refresh_token_str = AuthService.create_refresh_token(user.id)
+    db.session.add(refresh_token_obj)
+    db.session.commit()
+
+    access_token = AuthService.generate_access_token(user.id)
+
+    return success_response({
+        'user': user.to_dict(),
+        'accessToken': access_token,
+        'accessTokenExpiresIn': 1800,
+        'refreshToken': refresh_token_str,
+        'refreshTokenExpiresIn': 2592000,
+    }, '微信登录成功')
+
+
+@auth_bp.route('/bind-wechat', methods=['POST'])
+@auth_required
+def bind_wechat():
+    """将微信 openid 绑定到当前已登录账号"""
+    data = request.get_json()
+    if not data:
+        return error_response('请求体无效', 'VALIDATION_FAILED', 422)
+
+    code = data.get('code', '').strip()
+    if not code:
+        return error_response('code 必填', 'VALIDATION_FAILED', 422)
+
+    openid, err = _call_wechat_code2session(code)
+
+    if err == 'WECHAT_CONFIG_MISSING':
+        return error_response('微信登录暂不可用', 'WECHAT_CONFIG_MISSING', 500)
+    if err == 'WECHAT_API_UNAVAILABLE':
+        return error_response('微信服务暂时不可用，请稍后重试', 'WECHAT_API_UNAVAILABLE', 503)
+    if err == 'WECHAT_CODE_INVALID':
+        return error_response('微信授权已过期，请重试', 'WECHAT_CODE_INVALID', 400)
+
+    current_user = g.current_user
+
+    # 当前用户已绑定相同 openid：幂等成功
+    if current_user.wechat_openid == openid:
+        return success_response({'user': current_user.to_dict()}, '微信已绑定')
+
+    # 当前用户已绑定不同 openid
+    if current_user.wechat_openid and current_user.wechat_openid != openid:
+        return error_response('当前账号已绑定微信', 'ACCOUNT_ALREADY_HAS_WECHAT', 409)
+
+    # openid 已被其他账号占用
+    existing = User.query.filter_by(wechat_openid=openid).first()
+    if existing and existing.id != current_user.id:
+        return error_response('该微信已绑定其他账号', 'WECHAT_ALREADY_BOUND', 409)
+
+    current_user.wechat_openid = openid
+    db.session.commit()
+
+    return success_response({'user': current_user.to_dict()}, '微信绑定成功')

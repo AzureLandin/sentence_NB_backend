@@ -11,10 +11,11 @@ class User(db.Model):
     __tablename__ = 'users'
 
     id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
-    email = db.Column(db.String(255), unique=True, nullable=False, index=True)
-    password_hash = db.Column(db.String(255), nullable=False)
+    email = db.Column(db.String(255), unique=True, nullable=True, index=True)
+    password_hash = db.Column(db.String(255), nullable=True)
     display_name = db.Column(db.String(100))
     status = db.Column(db.String(20), default='active')
+    wechat_openid = db.Column(db.String(64), unique=True, nullable=True, index=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -27,7 +28,8 @@ class User(db.Model):
         return {
             'id': self.id,
             'email': self.email,
-            'displayName': self.display_name
+            'displayName': self.display_name,
+            'wechatBound': self.wechat_openid is not None,
         }
 
 
