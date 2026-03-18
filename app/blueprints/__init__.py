@@ -4,5 +4,6 @@ from .sync import sync_bp
 from .ai import ai_bp
 from .ai_config import ai_config_bp
 from .daily import daily_bp
+from .health import health_bp
 
-__all__ = ['auth_bp', 'user_bp', 'sync_bp', 'ai_bp', 'ai_config_bp', 'daily_bp']
+__all__ = ['auth_bp', 'user_bp', 'sync_bp', 'ai_bp', 'ai_config_bp', 'daily_bp', 'health_bp']
