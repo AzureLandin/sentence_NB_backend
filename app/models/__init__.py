@@ -21,6 +21,7 @@ class User(db.Model):
     refresh_tokens = db.relationship('RefreshToken', backref='user', lazy=True, cascade='all, delete-orphan')
     settings = db.relationship('UserSettings', backref='user', uselist=False, lazy=True, cascade='all, delete-orphan')
     sentences = db.relationship('Sentence', backref='user', lazy=True, cascade='all, delete-orphan')
+    ai_config = db.relationship('UserAIConfig', backref='user', uselist=False, lazy=True, cascade='all, delete-orphan')
 
     def to_dict(self):
         return {
@@ -92,6 +93,40 @@ class Sentence(db.Model):
             'updatedAt': self.updated_at.isoformat() + 'Z' if self.updated_at else None,
             'deletedAt': self.deleted_at.isoformat() + 'Z' if self.deleted_at else None,
             'version': self.version
+        }
+
+
+class UserAIConfig(db.Model):
+    __tablename__ = 'user_ai_configs'
+
+    id              = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id         = db.Column(db.String(36), db.ForeignKey('users.id'), unique=True, nullable=False)
+    text_provider   = db.Column(db.String(64), nullable=True)
+    text_api_key    = db.Column(db.Text, nullable=True)   # Fernet 加密
+    text_endpoint   = db.Column(db.Text, nullable=True)
+    text_model      = db.Column(db.String(128), nullable=True)
+    vision_provider = db.Column(db.String(64), nullable=True)
+    vision_api_key  = db.Column(db.Text, nullable=True)   # Fernet 加密
+    vision_endpoint = db.Column(db.Text, nullable=True)
+    vision_model    = db.Column(db.String(128), nullable=True)
+    created_at      = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at      = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    def to_dict(self, mask_keys=True, decrypted_text_key=None, decrypted_vision_key=None):
+        """返回配置字典，mask_keys=True 时 api_key 字段脱敏"""
+        def mask(val):
+            if not val or not mask_keys:
+                return val
+            return val[:3] + '****' + val[-4:] if len(val) > 7 else '****'
+        return {
+            'textProvider':   self.text_provider,
+            'textApiKey':     mask(decrypted_text_key),
+            'textEndpoint':   self.text_endpoint,
+            'textModel':      self.text_model,
+            'visionProvider': self.vision_provider,
+            'visionApiKey':   mask(decrypted_vision_key),
+            'visionEndpoint': self.vision_endpoint,
+            'visionModel':    self.vision_model,
         }
 
 

@@ -86,12 +86,18 @@ class SyncPullService:
             if since_dt is not None:
                 include_settings = settings.updated_at > since_dt
             if include_settings:
-                changes.append({
-                    'entityType': 'setting',
-                    'entityId': user_id,
-                    'action': 'upsert',
-                    'record': settings.to_dict()
-                })
+                    record = settings.to_dict()
+                    # 过滤敏感字段，不通过同步协议下发 API Key / Endpoint
+                    for api_field in ('textApi', 'visionApi'):
+                        if isinstance(record.get(api_field), dict):
+                            record[api_field].pop('apiKey', None)
+                            record[api_field].pop('endpoint', None)
+                    changes.append({
+                        'entityType': 'setting',
+                        'entityId': user_id,
+                        'action': 'upsert',
+                        'record': record,
+                    })
 
         has_more = len(sentences) > SyncPullService.PAGE_SIZE
 
@@ -347,8 +353,17 @@ class SyncPushService:
                         'serverVersion': settings.version, 'details': {}}
 
         settings.use_mode = payload.get('useMode', settings.use_mode)
-        settings.text_api = payload.get('textApi', settings.text_api)
-        settings.vision_api = payload.get('visionApi', settings.vision_api)
+        # 向下兼容：客户端若上传了 apiKey / endpoint，静默忽略
+        text_api = payload.get('textApi', settings.text_api)
+        if isinstance(text_api, dict):
+            text_api = {k: v for k, v in text_api.items()
+                        if k not in ('apiKey', 'endpoint')}
+        vision_api = payload.get('visionApi', settings.vision_api)
+        if isinstance(vision_api, dict):
+            vision_api = {k: v for k, v in vision_api.items()
+                          if k not in ('apiKey', 'endpoint')}
+        settings.text_api = text_api
+        settings.vision_api = vision_api
         settings.ui = payload.get('ui', settings.ui)
         settings.version += 1
         settings.updated_at = datetime.utcnow()
