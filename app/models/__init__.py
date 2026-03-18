@@ -148,3 +148,23 @@ class SyncIdempotencyRecord(db.Model):
         db.UniqueConstraint('user_id', 'device_id', 'op_id', name='uq_idempotency_user_device_op'),
         db.Index('ix_idempotency_user_device_op', 'user_id', 'device_id', 'op_id'),
     )
+
+
+class DailySentence(db.Model):
+    __tablename__ = 'daily_sentences'
+
+    id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    content = db.Column(db.Text, nullable=False)
+    translation = db.Column(db.Text, nullable=False)
+    grammar_point = db.Column(db.String(100), nullable=True)
+    date = db.Column(db.Date, nullable=False, unique=True, index=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'content': self.content,
+            'translation': self.translation,
+            'grammarPoint': self.grammar_point,
+            'date': self.date.isoformat() if self.date else None,
+        }
