@@ -40,10 +40,6 @@ class RefreshToken(db.Model):
     revoked_at = db.Column(db.DateTime, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
-    __table_args__ = (
-        db.Index('ix_refresh_tokens_user_id', 'user_id'),
-    )
-
 
 class UserSettings(db.Model):
     __tablename__ = 'user_settings'
