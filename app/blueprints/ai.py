@@ -6,6 +6,10 @@ from app.services.ai_service import analyze_sentence, extract_sentences, NoBodie
 
 ai_bp = Blueprint('ai', __name__)
 
+ALLOWED_MIMES = {'image/jpeg', 'image/png', 'image/gif', 'image/webp'}
+MAX_SENTENCE_LEN = 2000
+MAX_IMAGE_B64_BYTES = 10 * 1024 * 1024  # 10 MB
+
 
 def _ok(data):
     return jsonify({'code': 'OK', 'message': 'success', 'data': data, 'requestId': str(uuid.uuid4())})
@@ -29,6 +33,9 @@ def api_analyze():
 
     if not sentence:
         return _err('VALIDATION_FAILED', '请提供需要分析的句子')
+
+    if len(sentence) > MAX_SENTENCE_LEN:
+        return _err('VALIDATION_FAILED', f'句子过长，最多 {MAX_SENTENCE_LEN} 字符')
 
     try:
         result = analyze_sentence(g.current_user_id, sentence)
@@ -55,6 +62,12 @@ def api_ocr():
 
     if not image:
         return _err('VALIDATION_FAILED', '请提供图片数据')
+
+    if mime not in ALLOWED_MIMES:
+        return _err('VALIDATION_FAILED', '不支持的图片格式，仅支持 jpeg/png/gif/webp')
+
+    if len(image) > MAX_IMAGE_B64_BYTES:
+        return _err('VALIDATION_FAILED', '图片过大，最多 10MB')
 
     try:
         sentences = extract_sentences(g.current_user_id, image, mime)

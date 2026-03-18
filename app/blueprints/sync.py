@@ -61,5 +61,9 @@ def push():
     if len(operations) == 0:
         return success_response({'results': [], 'nextCursor': ''})
 
+    MAX_OPS = 500
+    if len(operations) > MAX_OPS:
+        return error_response(f'operations 不能超过 {MAX_OPS} 条', 'VALIDATION_FAILED', 422)
+
     result = SyncPushService.push(g.current_user_id, device_id, operations)
     return success_response(result)

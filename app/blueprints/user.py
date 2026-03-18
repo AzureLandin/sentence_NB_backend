@@ -1,6 +1,7 @@
 import uuid
-from flask import Blueprint, jsonify, g
+from flask import Blueprint, jsonify, g, request
 from functools import wraps
+from app.models import db, User
 from app.services.auth_service import AuthService
 
 user_bp = Blueprint('user', __name__, url_prefix='')
@@ -29,27 +30,24 @@ def error_response(message, error_code, status=400):
 def auth_required(f):
     @wraps(f)
     def decorated(*args, **kwargs):
-        auth_header = ''
-        from flask import request
         auth_header = request.headers.get('Authorization', '')
-        
+
         if not auth_header.startswith('Bearer '):
             return error_response('未授权', 'UNAUTHORIZED', 401)
-        
+
         token = auth_header[7:]
         user_id = AuthService.verify_access_token(token)
-        
+
         if not user_id:
             return error_response('token 无效或已过期', 'UNAUTHORIZED', 401)
-        
-        from app.models import User
-        user = User.query.get(user_id)
+
+        user = db.session.get(User, user_id)
         if not user or user.status != 'active':
             return error_response('账号不存在或已禁用', 'UNAUTHORIZED', 401)
-        
+
         g.current_user = user
         g.current_user_id = user.id
-        
+
         return f(*args, **kwargs)
     return decorated
 

@@ -10,6 +10,9 @@ def create_app(config_class=Config):
     
     CORS(app, origins='*', supports_credentials=True)
     
+    if not app.config.get('JWT_SECRET_KEY'):
+        raise RuntimeError('JWT_SECRET_KEY environment variable must be set')
+
     db.init_app(app)
     migrate.init_app(app, db)
     

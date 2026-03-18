@@ -1,7 +1,7 @@
 import hashlib
 import json
 import base64
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from flask import current_app
 from app.models import db, Sentence, UserSettings, SyncIdempotencyRecord
 
@@ -119,7 +119,7 @@ class SyncPullService:
                 next_cursor = cursor_str
             else:
                 next_cursor = _encode_cursor(
-                    datetime.utcnow().isoformat(), ''
+                    datetime.now(timezone.utc).isoformat(), ''
                 )
 
         return {
@@ -184,7 +184,7 @@ class SyncPushService:
             results.append(result)
 
         # Build cursor reflecting latest server state
-        next_cursor = _encode_cursor(datetime.utcnow().isoformat(), '')
+        next_cursor = _encode_cursor(datetime.now(timezone.utc).isoformat(), '')
 
         return {'results': results, 'nextCursor': next_cursor}
 
@@ -198,6 +198,11 @@ class SyncPushService:
         }
 
         # --- Basic validation ---
+        if not op_id or not entity_id:
+            return {**base_result, 'status': 'invalid',
+                    'errorCode': 'VALIDATION_FAILED', 'retryable': False,
+                    'details': {'reason': 'opId and entityId are required'}}
+
         if entity_type not in VALID_ACTIONS:
             return {**base_result, 'status': 'invalid',
                     'errorCode': 'VALIDATION_FAILED', 'retryable': False,
@@ -216,7 +221,7 @@ class SyncPushService:
 
         # --- Idempotency check ---
         window = timedelta(days=current_app.config['IDEMPOTENCY_WINDOW_DAYS'])
-        expires_at = datetime.utcnow() + window
+        expires_at = datetime.now(timezone.utc) + window
 
         existing_idempotency = SyncIdempotencyRecord.query.filter_by(
             user_id=user_id, device_id=device_id, op_id=op_id
@@ -275,15 +280,19 @@ class SyncPushService:
                 return {**base_result, 'status': 'conflict',
                         'errorCode': 'VERSION_MISMATCH', 'retryable': False,
                         'serverVersion': sentence.version, 'details': {}}
-            sentence.deleted_at = datetime.utcnow()
+            sentence.deleted_at = datetime.now(timezone.utc)
             sentence.version += 1
-            sentence.updated_at = datetime.utcnow()
+            sentence.updated_at = datetime.now(timezone.utc)
             db.session.commit()
             return {**base_result, 'status': 'applied',
                     'serverVersion': sentence.version,
                     'serverUpdatedAt': sentence.updated_at.isoformat() + 'Z'}
 
         if action == 'create':
+            if not payload or 'content' not in payload:
+                return {**base_result, 'status': 'invalid',
+                        'errorCode': 'VALIDATION_FAILED', 'retryable': False,
+                        'details': {'field': 'content', 'reason': 'required for create'}}
             if sentence:
                 # ID collision — treat as upsert conflict
                 if sentence.version != base_version:
@@ -324,7 +333,7 @@ class SyncPushService:
                 sentence.source = str(payload.get('source', 'text'))
 
             sentence.version += 1
-            sentence.updated_at = datetime.utcnow()
+            sentence.updated_at = datetime.now(timezone.utc)
             db.session.commit()
 
             return {**base_result, 'status': 'applied',
@@ -366,7 +375,7 @@ class SyncPushService:
         settings.vision_api = vision_api
         settings.ui = payload.get('ui', settings.ui)
         settings.version += 1
-        settings.updated_at = datetime.utcnow()
+        settings.updated_at = datetime.now(timezone.utc)
         db.session.commit()
 
         return {**base_result, 'status': 'applied',

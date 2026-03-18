@@ -1,10 +1,14 @@
 from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 db = SQLAlchemy()
 migrate = Migrate()
+
+
+def _now():
+    return datetime.now(timezone.utc)
 
 
 class User(db.Model):
@@ -16,8 +20,8 @@ class User(db.Model):
     display_name = db.Column(db.String(100))
     status = db.Column(db.String(20), default='active')
     wechat_openid = db.Column(db.String(64), unique=True, nullable=True, index=True)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = db.Column(db.DateTime(timezone=True), default=_now)
+    updated_at = db.Column(db.DateTime(timezone=True), default=_now, onupdate=_now)
 
     refresh_tokens = db.relationship('RefreshToken', backref='user', lazy=True, cascade='all, delete-orphan')
     settings = db.relationship('UserSettings', backref='user', uselist=False, lazy=True, cascade='all, delete-orphan')
@@ -38,10 +42,10 @@ class RefreshToken(db.Model):
 
     id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     user_id = db.Column(db.String(36), db.ForeignKey('users.id'), nullable=False, index=True)
-    token_hash = db.Column(db.String(255), nullable=False)
-    expires_at = db.Column(db.DateTime, nullable=False)
-    revoked_at = db.Column(db.DateTime, nullable=True)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    token_hash = db.Column(db.String(255), nullable=False, index=True)
+    expires_at = db.Column(db.DateTime(timezone=True), nullable=False)
+    revoked_at = db.Column(db.DateTime(timezone=True), nullable=True)
+    created_at = db.Column(db.DateTime(timezone=True), default=_now)
 
 
 class UserSettings(db.Model):
@@ -53,7 +57,7 @@ class UserSettings(db.Model):
     vision_api = db.Column(db.JSON, default=dict)
     ui = db.Column(db.JSON, default=dict)
     version = db.Column(db.BigInteger, default=1)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at = db.Column(db.DateTime(timezone=True), default=_now, onupdate=_now)
 
     def to_dict(self):
         return {
@@ -75,9 +79,9 @@ class Sentence(db.Model):
     source = db.Column(db.String(20), default='text')
     analysis = db.Column(db.JSON, nullable=True)
     tags = db.Column(db.JSON, default=list)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, index=True)
-    deleted_at = db.Column(db.DateTime, nullable=True, index=True)
+    created_at = db.Column(db.DateTime(timezone=True), default=_now)
+    updated_at = db.Column(db.DateTime(timezone=True), default=_now, onupdate=_now, index=True)
+    deleted_at = db.Column(db.DateTime(timezone=True), nullable=True, index=True)
     version = db.Column(db.BigInteger, default=1)
 
     __table_args__ = (
@@ -111,8 +115,8 @@ class UserAIConfig(db.Model):
     vision_api_key  = db.Column(db.Text, nullable=True)   # Fernet 加密
     vision_endpoint = db.Column(db.Text, nullable=True)
     vision_model    = db.Column(db.String(128), nullable=True)
-    created_at      = db.Column(db.DateTime, default=datetime.utcnow)
-    updated_at      = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at      = db.Column(db.DateTime(timezone=True), default=_now)
+    updated_at      = db.Column(db.DateTime(timezone=True), default=_now, onupdate=_now)
 
     def to_dict(self, mask_keys=True, decrypted_text_key=None, decrypted_vision_key=None):
         """返回配置字典，mask_keys=True 时 api_key 字段脱敏"""
@@ -141,8 +145,8 @@ class SyncIdempotencyRecord(db.Model):
     op_id = db.Column(db.String(100), nullable=False)
     request_hash = db.Column(db.String(64), nullable=False)
     result_snapshot = db.Column(db.JSON)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    expires_at = db.Column(db.DateTime, nullable=False)
+    created_at = db.Column(db.DateTime(timezone=True), default=_now)
+    expires_at = db.Column(db.DateTime(timezone=True), nullable=False)
 
     __table_args__ = (
         db.UniqueConstraint('user_id', 'device_id', 'op_id', name='uq_idempotency_user_device_op'),
@@ -158,7 +162,7 @@ class DailySentence(db.Model):
     translation = db.Column(db.Text, nullable=False)
     grammar_point = db.Column(db.String(100), nullable=True)
     date = db.Column(db.Date, nullable=False, unique=True, index=True)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime(timezone=True), default=_now)
 
     def to_dict(self):
         return {

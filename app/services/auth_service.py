@@ -2,9 +2,9 @@ import uuid
 import hashlib
 import bcrypt
 import jwt
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from flask import current_app
-from app.models import User, RefreshToken
+from app.models import User, RefreshToken, db
 
 
 class AuthService:
@@ -22,12 +22,13 @@ class AuthService:
 
     @staticmethod
     def generate_access_token(user_id):
-        expires = datetime.utcnow() + timedelta(minutes=current_app.config['ACCESS_TOKEN_EXPIRE_MINUTES'])
+        now = datetime.now(timezone.utc)
+        expires = now + timedelta(minutes=current_app.config['ACCESS_TOKEN_EXPIRE_MINUTES'])
         payload = {
             'sub': user_id,
             'type': 'access',
             'exp': expires,
-            'iat': datetime.utcnow()
+            'iat': now,
         }
         return jwt.encode(payload, current_app.config['JWT_SECRET_KEY'], algorithm=current_app.config['JWT_ALGORITHM'])
 
@@ -43,7 +44,7 @@ class AuthService:
     def create_user(email, password, display_name=None):
         normalized_email = AuthService.normalize_email(email)
         password_hash = AuthService.hash_password(password)
-        
+
         user = User(
             id=str(uuid.uuid4()),
             email=normalized_email,
@@ -55,11 +56,11 @@ class AuthService:
     @staticmethod
     def register(email, password, display_name=None):
         normalized_email = AuthService.normalize_email(email)
-        
+
         existing = User.query.filter_by(email=normalized_email).first()
         if existing:
             return None, 'EMAIL_ALREADY_EXISTS'
-        
+
         user = AuthService.create_user(email, password, display_name)
         return user, None
 
@@ -67,24 +68,28 @@ class AuthService:
     def login(email, password):
         normalized_email = AuthService.normalize_email(email)
         user = User.query.filter_by(email=normalized_email).first()
-        
+
         if not user:
             return None, 'INVALID_CREDENTIALS'
-        
+
         if user.status != 'active':
             return None, 'ACCOUNT_DISABLED'
-        
+
+        # password_hash 为 None 表示微信用户，不允许密码登录
+        if not user.password_hash:
+            return None, 'INVALID_CREDENTIALS'
+
         if not AuthService.verify_password(password, user.password_hash):
             return None, 'INVALID_CREDENTIALS'
-        
+
         return user, None
 
     @staticmethod
     def create_refresh_token(user_id):
         token = AuthService.generate_refresh_token()
         token_hash = AuthService.hash_token(token)
-        expires_at = datetime.utcnow() + timedelta(days=current_app.config['REFRESH_TOKEN_EXPIRE_DAYS'])
-        
+        expires_at = datetime.now(timezone.utc) + timedelta(days=current_app.config['REFRESH_TOKEN_EXPIRE_DAYS'])
+
         refresh_token = RefreshToken(
             user_id=user_id,
             token_hash=token_hash,
@@ -96,26 +101,31 @@ class AuthService:
     def refresh_access_token(refresh_token_str):
         token_hash = AuthService.hash_token(refresh_token_str)
         refresh_token = RefreshToken.query.filter_by(token_hash=token_hash).first()
-        
+
         if not refresh_token:
             return None, 'REFRESH_TOKEN_REVOKED'
-        
+
         if refresh_token.revoked_at:
             return None, 'REFRESH_TOKEN_REVOKED'
-        
-        if refresh_token.expires_at < datetime.utcnow():
+
+        if refresh_token.expires_at < datetime.now(timezone.utc):
             return None, 'REFRESH_TOKEN_EXPIRED'
-        
-        user = User.query.get(refresh_token.user_id)
+
+        user = db.session.get(User, refresh_token.user_id)
         if not user or user.status != 'active':
             return None, 'ACCOUNT_DISABLED'
-        
-        refresh_token.revoked_at = datetime.utcnow()
-        
+
+        refresh_token.revoked_at = datetime.now(timezone.utc)
+
+        # 懒清理：删除该用户已过期和已吊销的旧 token，防止表无限增长
+        RefreshToken.query.filter_by(user_id=user.id).filter(
+            (RefreshToken.revoked_at != None) | (RefreshToken.expires_at < datetime.now(timezone.utc))  # noqa: E711
+        ).delete(synchronize_session=False)
+
         new_refresh_token_obj, new_refresh_token_str = AuthService.create_refresh_token(user.id)
-        
+
         access_token = AuthService.generate_access_token(user.id)
-        
+
         return {
             'user': user,
             'access_token': access_token,
@@ -127,10 +137,10 @@ class AuthService:
     def logout(refresh_token_str):
         token_hash = AuthService.hash_token(refresh_token_str)
         refresh_token = RefreshToken.query.filter_by(token_hash=token_hash).first()
-        
+
         if refresh_token and not refresh_token.revoked_at:
-            refresh_token.revoked_at = datetime.utcnow()
-        
+            refresh_token.revoked_at = datetime.now(timezone.utc)
+
         return True
 
     @staticmethod

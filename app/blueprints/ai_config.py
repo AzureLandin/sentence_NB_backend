@@ -1,9 +1,10 @@
 import uuid
+import requests as req
 from flask import Blueprint, request, g, jsonify
 from app.blueprints.user import auth_required
 from app.models import db, UserAIConfig
 from app.services.ai_config_service import (
-    encrypt_key, resolve_api_config, AiConfigMissingError
+    encrypt_key, decrypt_key, resolve_api_config, AiConfigMissingError
 )
 
 ai_config_bp = Blueprint('ai_config', __name__)
@@ -38,7 +39,6 @@ def get_ai_config():
         })
 
     # 解密后传给 to_dict 做脱敏
-    from app.services.ai_config_service import decrypt_key
     def _safe_decrypt(val):
         if not val:
             return None
@@ -105,7 +105,6 @@ def test_ai_config():
     except AiConfigMissingError as e:
         return _err('AI_CONFIG_MISSING', str(e), http_status=503)
 
-    import requests as req
     try:
         headers = {
             'Content-Type': 'application/json',
