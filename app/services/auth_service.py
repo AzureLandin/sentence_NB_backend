@@ -108,18 +108,22 @@ class AuthService:
         if refresh_token.revoked_at:
             return None, 'REFRESH_TOKEN_REVOKED'
 
-        if refresh_token.expires_at < datetime.now(timezone.utc):
+        now = datetime.now(timezone.utc)
+        expires_at = refresh_token.expires_at
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+
+        if expires_at < now:
             return None, 'REFRESH_TOKEN_EXPIRED'
 
         user = db.session.get(User, refresh_token.user_id)
         if not user or user.status != 'active':
             return None, 'ACCOUNT_DISABLED'
 
-        refresh_token.revoked_at = datetime.now(timezone.utc)
+        refresh_token.revoked_at = now
 
-        # 懒清理：删除该用户已过期和已吊销的旧 token，防止表无限增长
         RefreshToken.query.filter_by(user_id=user.id).filter(
-            (RefreshToken.revoked_at != None) | (RefreshToken.expires_at < datetime.now(timezone.utc))  # noqa: E711
+            (RefreshToken.revoked_at != None) | (RefreshToken.expires_at < now)  # noqa: E711
         ).delete(synchronize_session=False)
 
         new_refresh_token_obj, new_refresh_token_str = AuthService.create_refresh_token(user.id)
