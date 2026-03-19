@@ -52,6 +52,29 @@ def auth_required(f):
     return decorated
 
 
+def optional_auth(f):
+    """可选鉴权：有 token 则验证，无 token 则跳过"""
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        auth_header = request.headers.get('Authorization', '')
+
+        if auth_header.startswith('Bearer '):
+            token = auth_header[7:]
+            user_id = AuthService.verify_access_token(token)
+
+            if user_id:
+                user = db.session.get(User, user_id)
+                if user and user.status == 'active':
+                    g.current_user = user
+                    g.current_user_id = user.id
+                    return f(*args, **kwargs)
+
+        g.current_user = None
+        g.current_user_id = None
+        return f(*args, **kwargs)
+    return decorated
+
+
 @user_bp.route('/me', methods=['GET'])
 @auth_required
 def get_me():

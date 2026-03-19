@@ -1,83 +1,109 @@
 import uuid
 from flask import Blueprint, request, g, jsonify
-from app.blueprints.user import auth_required
-from app.services.ai_config_service import AiConfigMissingError
-from app.services.ai_service import analyze_sentence, extract_sentences, NoBodiesFoundError
+from app.blueprints.user import optional_auth
+from app.services.ai_config_service import AiConfigMissingError, EndpointNotAllowedError
+from app.services.ai_service import (
+    analyze_sentence,
+    extract_sentences,
+    NoBodiesFoundError,
+)
 
-ai_bp = Blueprint('ai', __name__)
+ai_bp = Blueprint("ai", __name__)
 
-ALLOWED_MIMES = {'image/jpeg', 'image/png', 'image/gif', 'image/webp'}
+ALLOWED_MIMES = {"image/jpeg", "image/png", "image/gif", "image/webp"}
 MAX_SENTENCE_LEN = 2000
 MAX_IMAGE_B64_BYTES = 10 * 1024 * 1024  # 10 MB
 
 
 def _ok(data):
-    return jsonify({'code': 'OK', 'message': 'success', 'data': data, 'requestId': str(uuid.uuid4())})
+    return jsonify(
+        {
+            "code": "OK",
+            "message": "success",
+            "data": data,
+            "requestId": str(uuid.uuid4()),
+        }
+    )
 
 
 def _err(error_code, message, http_status=400, retryable=False):
-    return jsonify({
-        'code': 'ERROR',
-        'errorCode': error_code,
-        'message': message,
-        'retryable': retryable,
-        'requestId': str(uuid.uuid4()),
-    }), http_status
+    return (
+        jsonify(
+            {
+                "code": "ERROR",
+                "errorCode": error_code,
+                "message": message,
+                "retryable": retryable,
+                "requestId": str(uuid.uuid4()),
+            }
+        ),
+        http_status,
+    )
 
 
-@ai_bp.post('/api/analyze')
-@auth_required
+@ai_bp.post("/api/analyze")
+@optional_auth
 def api_analyze():
     body = request.get_json(silent=True) or {}
-    sentence = (body.get('sentence') or '').strip()
+    sentence = (body.get("sentence") or "").strip()
 
     if not sentence:
-        return _err('VALIDATION_FAILED', '请提供需要分析的句子')
+        return _err("VALIDATION_FAILED", "请提供需要分析的句子")
 
     if len(sentence) > MAX_SENTENCE_LEN:
-        return _err('VALIDATION_FAILED', f'句子过长，最多 {MAX_SENTENCE_LEN} 字符')
+        return _err("VALIDATION_FAILED", f"句子过长，最多 {MAX_SENTENCE_LEN} 字符")
 
     try:
         result = analyze_sentence(g.current_user_id, sentence)
         return _ok(result)
     except AiConfigMissingError as e:
-        return _err('AI_CONFIG_MISSING',
-                    'AI 服务暂未配置，请联系管理员或在设置中填写自有 Key',
-                    http_status=503)
+        return _err(
+            "AI_CONFIG_MISSING", "AI 服务暂未配置，请联系管理员或在设置中填写自有 Key", http_status=503
+        )
+    except EndpointNotAllowedError as e:
+        return _err("VALIDATION_FAILED", str(e), http_status=422)
     except (ValueError, Exception) as e:
         error_msg = str(e)
-        if 'JSON' in error_msg or '缺少必要字段' in error_msg:
-            return _err('AI_CALL_FAILED', f'AI 返回格式异常，请重试: {error_msg}',
-                        http_status=502, retryable=True)
-        return _err('AI_CALL_FAILED', f'AI 调用失败: {error_msg}',
-                    http_status=502, retryable=True)
+        if "JSON" in error_msg or "缺少必要字段" in error_msg:
+            return _err(
+                "AI_CALL_FAILED",
+                f"AI 返回格式异常，请重试: {error_msg}",
+                http_status=502,
+                retryable=True,
+            )
+        return _err(
+            "AI_CALL_FAILED", f"AI 调用失败: {error_msg}", http_status=502, retryable=True
+        )
 
 
-@ai_bp.post('/api/ocr')
-@auth_required
+@ai_bp.post("/api/ocr")
+@optional_auth
 def api_ocr():
     body = request.get_json(silent=True) or {}
-    image = (body.get('image') or '').strip()
-    mime = body.get('mime', 'image/jpeg')
+    image = (body.get("image") or "").strip()
+    mime = body.get("mime", "image/jpeg")
 
     if not image:
-        return _err('VALIDATION_FAILED', '请提供图片数据')
+        return _err("VALIDATION_FAILED", "请提供图片数据")
 
     if mime not in ALLOWED_MIMES:
-        return _err('VALIDATION_FAILED', '不支持的图片格式，仅支持 jpeg/png/gif/webp')
+        return _err("VALIDATION_FAILED", "不支持的图片格式，仅支持 jpeg/png/gif/webp")
 
     if len(image) > MAX_IMAGE_B64_BYTES:
-        return _err('VALIDATION_FAILED', '图片过大，最多 10MB')
+        return _err("VALIDATION_FAILED", "图片过大，最多 10MB")
 
     try:
         sentences = extract_sentences(g.current_user_id, image, mime)
-        return _ok({'sentences': sentences})
+        return _ok({"sentences": sentences})
     except AiConfigMissingError:
-        return _err('AI_CONFIG_MISSING',
-                    'AI 服务暂未配置，请联系管理员或在设置中填写自有 Key',
-                    http_status=503)
+        return _err(
+            "AI_CONFIG_MISSING", "AI 服务暂未配置，请联系管理员或在设置中填写自有 Key", http_status=503
+        )
+    except EndpointNotAllowedError as e:
+        return _err("VALIDATION_FAILED", str(e), http_status=422)
     except NoBodiesFoundError as e:
-        return _err('NO_SENTENCES_FOUND', str(e), http_status=422)
+        return _err("NO_SENTENCES_FOUND", str(e), http_status=422)
     except Exception as e:
-        return _err('AI_CALL_FAILED', f'OCR 调用失败: {str(e)}',
-                    http_status=502, retryable=True)
+        return _err(
+            "AI_CALL_FAILED", f"OCR 调用失败: {str(e)}", http_status=502, retryable=True
+        )
