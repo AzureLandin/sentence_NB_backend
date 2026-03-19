@@ -232,6 +232,29 @@ def _create_wechat_user_and_tokens(openid):
     return user, access_token, refresh_token_str
 
 
+def _bind_wechat_openid(openid):
+    """将 openid 绑定到当前登录用户，返回 (user, error_code)"""
+    current_user = g.current_user
+    
+    # 当前用户已绑定相同 openid：幂等成功
+    if current_user.wechat_openid == openid:
+        return current_user, None
+    
+    # 当前用户已绑定不同 openid
+    if current_user.wechat_openid and current_user.wechat_openid != openid:
+        return None, 'ACCOUNT_ALREADY_HAS_WECHAT'
+    
+    # openid 已被其他账号占用
+    existing = User.query.filter_by(wechat_openid=openid).first()
+    if existing and existing.id != current_user.id:
+        return None, 'WECHAT_ALREADY_BOUND'
+    
+    current_user.wechat_openid = openid
+    db.session.commit()
+    
+    return current_user, None
+
+
 @auth_bp.route('/wechat', methods=['POST'])
 def wechat_login():
     """微信一键登录：code 换 JWT（传统方式，适用于非云托管环境）"""
@@ -295,7 +318,7 @@ def wechat_cloud_login():
 @auth_bp.route('/bind-wechat', methods=['POST'])
 @auth_required
 def bind_wechat():
-    """将微信 openid 绑定到当前已登录账号"""
+    """将微信 openid 绑定到当前已登录账号（传统方式，需 code）"""
     data = request.get_json()
     if not data:
         return error_response('请求体无效', 'VALIDATION_FAILED', 422)
@@ -313,22 +336,28 @@ def bind_wechat():
     if err == 'WECHAT_CODE_INVALID':
         return error_response('微信授权已过期，请重试', 'WECHAT_CODE_INVALID', 400)
 
-    current_user = g.current_user
-
-    # 当前用户已绑定相同 openid：幂等成功
-    if current_user.wechat_openid == openid:
-        return success_response({'user': current_user.to_dict()}, '微信已绑定')
-
-    # 当前用户已绑定不同 openid
-    if current_user.wechat_openid and current_user.wechat_openid != openid:
+    user, err = _bind_wechat_openid(openid)
+    if err == 'ACCOUNT_ALREADY_HAS_WECHAT':
         return error_response('当前账号已绑定微信', 'ACCOUNT_ALREADY_HAS_WECHAT', 409)
-
-    # openid 已被其他账号占用
-    existing = User.query.filter_by(wechat_openid=openid).first()
-    if existing and existing.id != current_user.id:
+    if err == 'WECHAT_ALREADY_BOUND':
         return error_response('该微信已绑定其他账号', 'WECHAT_ALREADY_BOUND', 409)
 
-    current_user.wechat_openid = openid
-    db.session.commit()
+    return success_response({'user': user.to_dict()}, '微信绑定成功')
 
-    return success_response({'user': current_user.to_dict()}, '微信绑定成功')
+
+@auth_bp.route('/bind-wechat-cloud', methods=['POST'])
+@auth_required
+def bind_wechat_cloud():
+    """云托管微信绑定：从请求头 X-WX-OPENID 获取 openid（推荐）"""
+    openid = request.headers.get('X-WX-OPENID')
+    
+    if not openid:
+        return error_response('无法获取用户身份，请确保在微信小程序云托管环境下调用', 'NO_OPENID', 401)
+    
+    user, err = _bind_wechat_openid(openid)
+    if err == 'ACCOUNT_ALREADY_HAS_WECHAT':
+        return error_response('当前账号已绑定微信', 'ACCOUNT_ALREADY_HAS_WECHAT', 409)
+    if err == 'WECHAT_ALREADY_BOUND':
+        return error_response('该微信已绑定其他账号', 'WECHAT_ALREADY_BOUND', 409)
+
+    return success_response({'user': user.to_dict()}, '微信绑定成功')
