@@ -210,9 +210,31 @@ def _call_wechat_code2session(code):
     return openid, None
 
 
+def _create_wechat_user_and_tokens(openid):
+    """根据 openid 查找或创建用户，返回 (user, access_token, refresh_token_str)"""
+    user = User.query.filter_by(wechat_openid=openid).first()
+    if not user:
+        user = User(
+            id=str(uuid.uuid4()),
+            wechat_openid=openid,
+            display_name='微信用户',
+            status='active',
+        )
+        db.session.add(user)
+    elif user.status != 'active':
+        return None, 'ACCOUNT_DISABLED'
+    
+    refresh_token_obj, refresh_token_str = AuthService.create_refresh_token(user.id)
+    db.session.add(refresh_token_obj)
+    db.session.commit()
+    
+    access_token = AuthService.generate_access_token(user.id)
+    return user, access_token, refresh_token_str
+
+
 @auth_bp.route('/wechat', methods=['POST'])
 def wechat_login():
-    """微信一键登录：code 换 JWT"""
+    """微信一键登录：code 换 JWT（传统方式，适用于非云托管环境）"""
     data = request.get_json()
     if not data:
         return error_response('请求体无效', 'VALIDATION_FAILED', 422)
@@ -230,24 +252,35 @@ def wechat_login():
     if err == 'WECHAT_CODE_INVALID':
         return error_response('微信授权已过期，请重试', 'WECHAT_CODE_INVALID', 400)
 
-    # 查找或创建用户；status 检查仅对已存在用户有意义
-    user = User.query.filter_by(wechat_openid=openid).first()
-    if not user:
-        user = User(
-            id=str(uuid.uuid4()),
-            wechat_openid=openid,
-            display_name='微信用户',
-            status='active',
-        )
-        db.session.add(user)
-    elif user.status != 'active':
+    result = _create_wechat_user_and_tokens(openid)
+    if result[0] is None:
         return error_response('账号已禁用', 'ACCOUNT_DISABLED', 403)
+    
+    user, access_token, refresh_token_str = result
+    access_expires, refresh_expires = _token_expires()
 
-    refresh_token_obj, refresh_token_str = AuthService.create_refresh_token(user.id)
-    db.session.add(refresh_token_obj)
-    db.session.commit()
+    return success_response({
+        'user': user.to_dict(),
+        'accessToken': access_token,
+        'accessTokenExpiresIn': access_expires,
+        'refreshToken': refresh_token_str,
+        'refreshTokenExpiresIn': refresh_expires,
+    }, '微信登录成功')
 
-    access_token = AuthService.generate_access_token(user.id)
+
+@auth_bp.route('/wechat-cloud', methods=['POST'])
+def wechat_cloud_login():
+    """云托管微信登录：从请求头 X-WX-OPENID 获取用户身份（推荐）"""
+    openid = request.headers.get('X-WX-OPENID')
+    
+    if not openid:
+        return error_response('无法获取用户身份，请确保在微信小程序云托管环境下调用', 'NO_OPENID', 401)
+    
+    result = _create_wechat_user_and_tokens(openid)
+    if result[0] is None:
+        return error_response('账号已禁用', 'ACCOUNT_DISABLED', 403)
+    
+    user, access_token, refresh_token_str = result
     access_expires, refresh_expires = _token_expires()
 
     return success_response({
