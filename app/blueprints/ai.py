@@ -89,22 +89,24 @@ def api_analyze_status(task_id):
 def api_ocr():
     body = request.get_json(silent=True) or {}
     image = (body.get("image") or "").strip()
+    image_url = (body.get("imageUrl") or "").strip()
     mime = body.get("mime", "image/jpeg")
 
-    if not image:
-        return _err("VALIDATION_FAILED", "请提供图片数据")
+    if not image and not image_url:
+        return _err("VALIDATION_FAILED", "请提供图片数据（image 或 imageUrl）")
 
     if mime not in ALLOWED_MIMES:
         return _err("VALIDATION_FAILED", "不支持的图片格式，仅支持 jpeg/png/gif/webp")
 
-    if len(image) > MAX_IMAGE_B64_BYTES:
+    if image and len(image) > MAX_IMAGE_B64_BYTES:
         return _err("VALIDATION_FAILED", "图片过大，最多 10MB")
 
     try:
         task = AnalysisTask(
             user_id=g.current_user_id,
             task_type='ocr',
-            image_data=image,
+            image_data=image or None,
+            image_url=image_url or None,
             image_mime=mime,
             status='pending',
         )

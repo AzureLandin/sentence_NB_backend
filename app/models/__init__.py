@@ -188,6 +188,7 @@ class AnalysisTask(db.Model):
         db.Text().with_variant(mysql_types.MEDIUMTEXT(), 'mysql'),
         nullable=True,
     ))
+    image_url = db.Column(db.String(2048), nullable=True)
     image_mime = db.Column(db.String(50), nullable=True)
     status = db.Column(db.String(20), default='pending', index=True)
     result = db.Column(db.JSON, nullable=True)

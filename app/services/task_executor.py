@@ -138,6 +138,57 @@ def _do_analysis(task):
     )
 
 
+MAX_IMAGE_DOWNLOAD_BYTES = 10 * 1024 * 1024  # 10MB
+
+ALLOWED_IMAGE_HOSTS = (
+    '.tcb.qcloud.la',
+    '.cos.ap-shanghai.myqcloud.com',
+    '.cos.ap-guangzhou.myqcloud.com',
+    '.cos.ap-beijing.myqcloud.com',
+    '.file.myqcloud.com',
+    '.cloudbase.net',
+)
+
+
+def _is_valid_image_url(url):
+    """校验图片 URL 是否来自可信的微信云存储域名。"""
+    from urllib.parse import urlparse
+
+    try:
+        parsed = urlparse(url)
+        if parsed.scheme != 'https':
+            return False
+        host = (parsed.hostname or '').lower()
+        return any(host.endswith(d) for d in ALLOWED_IMAGE_HOSTS)
+    except Exception:
+        return False
+
+
+def _download_image_as_base64(url):
+    """从 URL 下载图片并转为 base64 字符串，限制大小防止 OOM。"""
+    import requests as http_requests
+    import base64
+
+    resp = http_requests.get(url, timeout=30, stream=True)
+    resp.raise_for_status()
+
+    content_length = resp.headers.get('Content-Length')
+    if content_length and int(content_length) > MAX_IMAGE_DOWNLOAD_BYTES:
+        resp.close()
+        raise ValueError(f'图片过大: {content_length} 字节')
+
+    chunks = []
+    downloaded = 0
+    for chunk in resp.iter_content(chunk_size=8192):
+        downloaded += len(chunk)
+        if downloaded > MAX_IMAGE_DOWNLOAD_BYTES:
+            resp.close()
+            raise ValueError(f'图片超过 {MAX_IMAGE_DOWNLOAD_BYTES // 1024 // 1024}MB 限制')
+        chunks.append(chunk)
+
+    return base64.b64encode(b''.join(chunks)).decode('utf-8')
+
+
 def _do_ocr(task):
     """执行 OCR 任务。"""
     from app.models import db
@@ -145,7 +196,7 @@ def _do_ocr(task):
     from app.services.ai_config_service import AiConfigMissingError, EndpointNotAllowedError
 
     user_id = task.user_id
-    image_data = task.image_data
+    image_url = task.image_url
     image_mime = task.image_mime or 'image/jpeg'
 
     # 标记为处理中
@@ -156,6 +207,27 @@ def _do_ocr(task):
     except Exception:
         db.session.rollback()
         logger.exception("任务 %s 状态更新失败", task.id)
+        return
+
+    # 获取图片 base64：优先从 URL 下载，否则使用直传的 image_data
+    if image_url:
+        if not _is_valid_image_url(image_url):
+            _fail_task(task.id, error_code='VALIDATION_FAILED',
+                       error_message='不允许的图片 URL 来源')
+            return
+        try:
+            image_data = _download_image_as_base64(image_url)
+        except Exception as e:
+            logger.error("任务 %s 下载图片失败: %s", task.id, e)
+            _fail_task(task.id, error_code='IMAGE_DOWNLOAD_FAILED',
+                       error_message=f'图片下载失败: {e}')
+            return
+    else:
+        image_data = task.image_data
+
+    if not image_data:
+        _fail_task(task.id, error_code='VALIDATION_FAILED',
+                   error_message='图片数据为空')
         return
 
     # 内部重试循环
