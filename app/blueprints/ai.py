@@ -1,12 +1,13 @@
 import uuid
 from flask import Blueprint, request, g, jsonify
-from app.blueprints.user import optional_auth
+from app.blueprints.user import auth_required, optional_auth
+from app.models import db, AnalysisTask
 from app.services.ai_config_service import AiConfigMissingError, EndpointNotAllowedError
 from app.services.ai_service import (
-    analyze_sentence,
     extract_sentences,
     NoBodiesFoundError,
 )
+from app.services.task_executor import submit_analysis_task
 
 ai_bp = Blueprint("ai", __name__)
 
@@ -42,7 +43,7 @@ def _err(error_code, message, http_status=400, retryable=False):
 
 
 @ai_bp.post("/api/analyze")
-@optional_auth
+@auth_required
 def api_analyze():
     body = request.get_json(silent=True) or {}
     sentence = (body.get("sentence") or "").strip()
@@ -54,26 +55,34 @@ def api_analyze():
         return _err("VALIDATION_FAILED", f"句子过长，最多 {MAX_SENTENCE_LEN} 字符")
 
     try:
-        result = analyze_sentence(g.current_user_id, sentence)
-        return _ok(result)
-    except AiConfigMissingError as e:
-        return _err(
-            "AI_CONFIG_MISSING", "AI 服务暂未配置，请联系管理员或在设置中填写自有 Key", http_status=503
+        task = AnalysisTask(
+            user_id=g.current_user_id,
+            sentence_content=sentence,
+            status='pending',
         )
-    except EndpointNotAllowedError as e:
-        return _err("VALIDATION_FAILED", str(e), http_status=422)
-    except (ValueError, Exception) as e:
-        error_msg = str(e)
-        if "JSON" in error_msg or "缺少必要字段" in error_msg:
-            return _err(
-                "AI_CALL_FAILED",
-                f"AI 返回格式异常，请重试: {error_msg}",
-                http_status=502,
-                retryable=True,
-            )
-        return _err(
-            "AI_CALL_FAILED", f"AI 调用失败: {error_msg}", http_status=502, retryable=True
-        )
+        db.session.add(task)
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        return _err("SERVICE_UNAVAILABLE", "服务暂时不可用", http_status=503, retryable=True)
+
+    submit_analysis_task(task.id, g.current_user_id, sentence)
+
+    return _ok({"taskId": task.id, "status": "pending"})
+
+
+@ai_bp.get("/api/analyze/<task_id>")
+@auth_required
+def api_analyze_status(task_id):
+    task = db.session.get(AnalysisTask, task_id)
+
+    if not task:
+        return _err("TASK_NOT_FOUND", "任务不存在", http_status=404)
+
+    if task.user_id != g.current_user_id:
+        return _err("FORBIDDEN", "无权访问此任务", http_status=403)
+
+    return _ok(task.to_dict())
 
 
 @ai_bp.post("/api/ocr")

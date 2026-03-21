@@ -172,3 +172,32 @@ class DailySentence(db.Model):
             'grammarPoint': self.grammar_point,
             'date': self.date.isoformat() if self.date else None,
         }
+
+
+class AnalysisTask(db.Model):
+    __tablename__ = 'analysis_tasks'
+
+    id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id = db.Column(db.String(36), db.ForeignKey('users.id'), nullable=False, index=True)
+    sentence_id = db.Column(db.String(36), db.ForeignKey('sentences.id'), nullable=True)
+    sentence_content = db.Column(db.Text, nullable=False)
+    status = db.Column(db.String(20), default='pending', index=True)
+    result = db.Column(db.JSON, nullable=True)
+    error_code = db.Column(db.String(50), nullable=True)
+    error_message = db.Column(db.Text, nullable=True)
+    retry_count = db.Column(db.Integer, default=0)
+    created_at = db.Column(db.DateTime(timezone=True), default=_now)
+    started_at = db.Column(db.DateTime(timezone=True), nullable=True)
+    completed_at = db.Column(db.DateTime(timezone=True), nullable=True)
+
+    def to_dict(self):
+        return {
+            'taskId': self.id,
+            'sentenceId': self.sentence_id,
+            'status': self.status,
+            'result': self.result,
+            'errorCode': self.error_code,
+            'errorMessage': self.error_message,
+            'createdAt': self.created_at.isoformat() + 'Z' if self.created_at else None,
+            'completedAt': self.completed_at.isoformat() + 'Z' if self.completed_at else None,
+        }
