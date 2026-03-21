@@ -1,5 +1,7 @@
 from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
+from sqlalchemy.orm import deferred
+from sqlalchemy.dialects import mysql as mysql_types
 import uuid
 from datetime import datetime, timezone
 
@@ -179,8 +181,14 @@ class AnalysisTask(db.Model):
 
     id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     user_id = db.Column(db.String(36), db.ForeignKey('users.id'), nullable=False, index=True)
+    task_type = db.Column(db.String(20), default='analysis', index=True)
     sentence_id = db.Column(db.String(36), db.ForeignKey('sentences.id'), nullable=True)
-    sentence_content = db.Column(db.Text, nullable=False)
+    sentence_content = db.Column(db.Text, nullable=True)
+    image_data = deferred(db.Column(
+        db.Text().with_variant(mysql_types.MEDIUMTEXT(), 'mysql'),
+        nullable=True,
+    ))
+    image_mime = db.Column(db.String(50), nullable=True)
     status = db.Column(db.String(20), default='pending', index=True)
     result = db.Column(db.JSON, nullable=True)
     error_code = db.Column(db.String(50), nullable=True)
@@ -193,6 +201,7 @@ class AnalysisTask(db.Model):
     def to_dict(self):
         return {
             'taskId': self.id,
+            'taskType': self.task_type,
             'sentenceId': self.sentence_id,
             'status': self.status,
             'result': self.result,
