@@ -7,36 +7,32 @@ from app.services.ai_config_service import resolve_api_config, AiConfigMissingEr
 # 句子分析
 # ---------------------------------------------------------------------------
 
-ANALYSIS_PROMPT = """分析这个英语句子，返回JSON对象。所有内容必须用中文！
+ANALYSIS_PROMPT = """Analyze this English sentence. Return JSON. All explanatory fields must be in Chinese.
 
-句子：{sentence}
+Sentence: {sentence}
 
-返回格式（纯JSON，无markdown）：
+Return format (pure JSON):
 {
   "structure": [
-    {"text": "从句/短语原文", "type": "主句/定语从句/状语从句/宾语从句/短语", "translation": "该部分中文翻译"}
+    {"text": "clause/phrase", "type": "main/relative/adverbial/objective clause/phrase", "translation": "Chinese"}
   ],
   "grammar": [
-    {"point": "语法点名称", "explanation": "中文详细解释", "examples": ["相关例句"]}
+    {"point": "grammar name", "explanation": "in Chinese"}
   ],
   "vocabulary": [
-    {"word": "词汇或表达", "meaning": "中文释义", "example": "例句"}
+    {"word": "word/expression", "meaning": "Chinese", "example": "English sentence"}
   ],
-  "translation": "通顺的中文翻译",
-  "translationNote": "翻译思路分析"
+  "translation": "fluent Chinese"
 }
 
-重要规则：
-1. 所有字段内容必须用中文（type、explanation、meaning、translation、translationNote）
-2. 只有 text、word、example 保留英文原文
-3. 翻译要通顺自然，符合中文表达习惯
-4. 语法解释要通俗易懂，适合中国学习者
-5. 翻译思路要说明为什么这样翻译，做了哪些调整
-6. 必须返回有效的JSON格式，不要有多余的嵌套大括号
+Rules:
+1. Keep text, word, example in English only
+2. All other fields (type, explanation, meaning, translation) must be in Chinese
+3. Return valid JSON only
 
-仅返回JSON对象，不要解释。"""
+Return JSON only."""
 
-ANALYSIS_SYSTEM_PROMPT = "你是一位专业的英语语言学教授，擅长分析英语长难句。所有回答内容必须使用中文，返回严格的JSON格式。"
+ANALYSIS_SYSTEM_PROMPT = "You are an English linguistics professor. All explanatory content must be in Chinese. Return strict JSON."
 
 
 def _call_ai(messages, api_config, timeout=90):
@@ -121,7 +117,6 @@ def analyze_sentence(user_id: str, sentence: str) -> dict:
         if field not in analysis:
             raise ValueError(f"分析结果缺少必要字段: {field}")
 
-    # 标准化结构，确保类型安全
     return {
         "structure": [
             {
@@ -136,7 +131,6 @@ def analyze_sentence(user_id: str, sentence: str) -> dict:
             {
                 "point": str(item.get("point", "")),
                 "explanation": str(item.get("explanation", "")),
-                "examples": [str(ex) for ex in (item.get("examples") or [])],
             }
             for item in (analysis.get("grammar") or [])
             if isinstance(item, dict)
@@ -151,7 +145,6 @@ def analyze_sentence(user_id: str, sentence: str) -> dict:
             if isinstance(item, dict)
         ],
         "translation": str(analysis.get("translation", "")),
-        "translationNote": str(analysis.get("translationNote", "")),
     }
 
 

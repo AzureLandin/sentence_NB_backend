@@ -3,13 +3,6 @@
 
 export FLASK_APP=run.py
 
-# 调试：打印 MySQL 环境变量
-echo "=== MySQL Environment Variables ==="
-echo "MYSQL_ADDRESS: $MYSQL_ADDRESS"
-echo "MYSQL_USERNAME: $MYSQL_USERNAME"
-echo "MYSQL_DATABASE: $MYSQL_DATABASE"
-echo "==================================="
-
 # 如果使用 MySQL，先创建数据库（如果不存在）
 if [ -n "$MYSQL_ADDRESS" ] && [ -n "$MYSQL_USERNAME" ] && [ -n "$MYSQL_PASSWORD" ]; then
     echo "Creating database if not exists..."
